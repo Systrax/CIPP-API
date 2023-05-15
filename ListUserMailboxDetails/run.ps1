@@ -25,6 +25,29 @@ try {
         anr = $MailRequest.PrimarySmtpAddress
     }
     $MailboxDetailedRequest = New-ExoRequest -TenantID $TenantFilter -cmdlet 'Get-Mailbox' -cmdParams $FetchParam
+    try {
+        $Archive = New-ExoRequest -TenantID $TenantFilter -cmdlet 'Get-Mailbox' -cmdParams $FetchParam
+        if ($Archive.ArchiveStatus -eq "Active") {
+            $ArchiveEnabled = $True 
+        }
+        else {
+            $ArchiveEnabled = $False
+        }
+
+        $FetchParam = @{
+            Identity = $MailRequest.PrimarySmtpAddress
+            Archive  = $true
+        }
+
+        $ArchiveSize = New-ExoRequest -TenantID $TenantFilter -cmdlet 'Get-MailboxStatistics' -cmdParams $FetchParam
+    }
+    catch {
+        $ArchiveEnabled = $False
+        $ArchiveSize = @{
+            TotalItemSize = "0"
+            ItemCount     = "0"
+        }
+    }
     $FetchParam = @{
         SenderAddress = $MailRequest.PrimarySmtpAddress
     }
@@ -41,7 +64,7 @@ try {
 
 }
 catch {
-    Write-Error "Failed Fetching Data $_"
+    Write-Error "Failed Fetching Data $($_.Exception.message): $($_.InvocationInfo.ScriptLineNumber)"
 }
 
 $ParsedPerms = foreach ($Perm in $PermsRequest, $PermsRequest2.RecipientPermission) {
@@ -49,7 +72,7 @@ $ParsedPerms = foreach ($Perm in $PermsRequest, $PermsRequest2.RecipientPermissi
     if ($perm.Trustee) {
         $perm | Where-Object Trustee | ForEach-Object { [PSCustomObject]@{
                 User         = $_.Trustee
-                AccessRights = $_.accessRights -join ', '
+                AccessRights = $_.accessRights -join ', ' 
             }
         }
             
@@ -73,7 +96,7 @@ else {
     $MailboxDetailedRequest.ForwardingSmtpAddress 
 }
 
-
+if ($ArchiveSize) { 
 $GraphRequest = [ordered]@{
     ForwardAndDeliver        = $MailboxDetailedRequest.DeliverToMailboxAndForward
     ForwardingAddress        = $ForwardingAddress
@@ -90,8 +113,38 @@ $GraphRequest = [ordered]@{
     ProhibitSendReceiveQuota = [math]::Round([float]($MailboxDetailedRequest.ProhibitSendReceiveQuota -split ' GB')[0], 2)
     ItemCount                = [math]::Round($StatsRequest.ItemCount, 2)
     TotalItemSize            = [math]::Round($StatsRequest.TotalItemSize / 1Gb, 2)
+    TotalArchiveItemSize     = $ArchiveSize.TotalItemSize.Split(" ")[0]
+    TotalArchiveItemCount    = [math]::Round($ArchiveSize.ItemCount, 2)
     BlockedForSpam           = $BlockedForSpam
+    ArchiveMailBox           = $ArchiveEnabled
+    AutoExpandingArchive     = $Archive.AutoExpandingArchiveEnabled
 }
+}
+else {
+    $GraphRequest = [ordered]@{
+        ForwardAndDeliver        = $MailboxDetailedRequest.DeliverToMailboxAndForward
+        ForwardingAddress        = $ForwardingAddress
+        LitiationHold            = $MailboxDetailedRequest.LitigationHoldEnabled
+        HiddenFromAddressLists   = $MailboxDetailedRequest.HiddenFromAddressListsEnabled
+        EWSEnabled               = $CASRequest.EwsEnabled
+        MailboxMAPIEnabled       = $CASRequest.MAPIEnabled
+        MailboxOWAEnabled        = $CASRequest.OWAEnabled
+        MailboxImapEnabled       = $CASRequest.ImapEnabled
+        MailboxPopEnabled        = $CASRequest.PopEnabled
+        MailboxActiveSyncEnabled = $CASRequest.ActiveSyncEnabled
+        Permissions              = $ParsedPerms
+        ProhibitSendQuota        = [math]::Round([float]($MailboxDetailedRequest.ProhibitSendQuota -split ' GB')[0], 2)
+        ProhibitSendReceiveQuota = [math]::Round([float]($MailboxDetailedRequest.ProhibitSendReceiveQuota -split ' GB')[0], 2)
+        ItemCount                = [math]::Round($StatsRequest.ItemCount, 2)
+        TotalItemSize            = [math]::Round($StatsRequest.TotalItemSize / 1Gb, 2)
+        TotalArchiveItemSize     = 0
+        TotalArchiveItemCount    = 0
+        BlockedForSpam           = $BlockedForSpam
+        ArchiveMailBox           = $ArchiveEnabled
+        AutoExpandingArchive     = $Archive.AutoExpandingArchiveEnabled
+    }
+}
+
 
 #$GraphRequest = [ordered]@{
 #    Connectivity  = $CASRequest
